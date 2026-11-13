@@ -1,18 +1,18 @@
-/********************************************************************************
- * Copyright (C) 2021 TypeFox and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2021 TypeFox and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import * as fs from 'fs-extra';
 import * as ts from 'typescript';
@@ -21,21 +21,19 @@ import * as path from 'path';
 import { glob } from 'glob';
 import { promisify } from 'util';
 import deepmerge = require('deepmerge');
+import { Localization, sortLocalization } from './common';
 
 const globPromise = promisify(glob);
 
-export interface Localization {
-    [key: string]: string | Localization
-}
-
 export interface ExtractionOptions {
-    root: string
-    output: string
+    root?: string
+    output?: string
     exclude?: string
     logs?: string
     /** List of globs matching the files to extract from. */
     files?: string[]
-    merge: boolean
+    merge?: boolean
+    quiet?: boolean
 }
 
 class SingleFileServiceHost implements ts.LanguageServiceHost {
@@ -54,11 +52,21 @@ class SingleFileServiceHost implements ts.LanguageServiceHost {
     getScriptSnapshot = (name: string) => name === this.filename ? this.file : this.lib;
     getCurrentDirectory = () => '';
     getDefaultLibFileName = () => 'lib.d.ts';
+    readFile(file: string, encoding?: string | undefined): string | undefined {
+        if (file === this.filename) {
+            return this.file.getText(0, this.file.getLength());
+        }
+    }
+    fileExists(file: string): boolean {
+        return this.filename === file;
+    }
 }
 
 class TypeScriptError extends Error {
-    constructor(message: string, node: ts.Node) {
+    readonly crossFileReference: boolean;
+    constructor(message: string, node: ts.Node, crossFileReference = false) {
         super(buildErrorMessage(message, node));
+        this.crossFileReference = crossFileReference;
     }
 }
 
@@ -74,29 +82,32 @@ const tsOptions: ts.CompilerOptions = {
 };
 
 export async function extract(options: ExtractionOptions): Promise<void> {
-    const cwd = path.resolve(process.cwd(), options.root);
+    const cwd = path.resolve(process.env.INIT_CWD || process.cwd(), options.root ?? '');
     const files: string[] = [];
-    await Promise.all((options.files ?? ['**/src/**/*.ts']).map(
+    await Promise.all((options.files ?? ['**/src/**/*.{ts,tsx}']).map(
         async pattern => files.push(...await globPromise(pattern, { cwd }))
     ));
     let localization: Localization = {};
     const errors: string[] = [];
     for (const file of files) {
         const filePath = path.resolve(cwd, file);
+        const fileName = path.relative(cwd, file).split(path.sep).join('/');
         const content = await fs.readFile(filePath, 'utf8');
-        const fileLocalization = await extractFromFile(file, content, errors, options);
+        const fileLocalization = await extractFromFile(fileName, content, errors, options);
         localization = deepmerge(localization, fileLocalization);
     }
     if (errors.length > 0 && options.logs) {
         await fs.writeFile(options.logs, errors.join(os.EOL));
     }
-    const output = path.resolve(process.cwd(), options.output);
-    if (options.merge && await fs.pathExists(output)) {
-        const existing = await fs.readJson(output);
+    const out = path.resolve(process.env.INIT_CWD || process.cwd(), options.output ?? '');
+    if (options.merge && await fs.pathExists(out)) {
+        const existing = await fs.readJson(out);
         localization = deepmerge(existing, localization);
     }
-    await fs.writeJson(options.output, localization, {
-        spaces: 4
+    localization = sortLocalization(localization);
+    await fs.mkdirs(path.dirname(out));
+    await fs.writeJson(out, localization, {
+        spaces: 2
     });
 }
 
@@ -108,20 +119,18 @@ export async function extractFromFile(file: string, content: string, errors?: st
     const localizationCalls = collect(sourceFile, node => isLocalizeCall(node));
     for (const call of localizationCalls) {
         try {
-            const extracted = extractFromLocalizeCall(call);
-            if (!isExcluded(options, extracted[0])) {
+            const extracted = extractFromLocalizeCall(call, options);
+            if (extracted) {
                 insert(localization, extracted);
             }
         } catch (err) {
-            const tsError = err as Error;
-            errors?.push(tsError.message);
-            console.log(tsError.message);
+            reportError(err, errors, options);
         }
     }
     const localizedCommands = collect(sourceFile, node => isCommandLocalizeUtility(node));
     for (const command of localizedCommands) {
         try {
-            const extracted = extractFromLocalizedCommandCall(command);
+            const extracted = extractFromLocalizedCommandCall(command, errors, options);
             const label = extracted.label;
             const category = extracted.category;
             if (!isExcluded(options, label[0])) {
@@ -131,12 +140,18 @@ export async function extractFromFile(file: string, content: string, errors?: st
                 insert(localization, category);
             }
         } catch (err) {
-            const tsError = err as Error;
-            errors?.push(tsError.message);
-            console.log(tsError.message);
+            reportError(err, errors, options);
         }
     }
     return localization;
+}
+
+function reportError(err: unknown, errors?: string[], options?: ExtractionOptions): void {
+    const tsError = err as TypeScriptError;
+    errors?.push(tsError.message);
+    if (!options?.quiet && !tsError.crossFileReference) {
+        console.log(tsError.message);
+    }
 }
 
 function isExcluded(options: ExtractionOptions | undefined, key: string): boolean {
@@ -194,7 +209,7 @@ function isLocalizeCall(node: ts.Node): boolean {
     return node.expression.getText() === 'nls.localize';
 }
 
-function extractFromLocalizeCall(node: ts.Node): [string, string, ts.Node] {
+function extractFromLocalizeCall(node: ts.Node, options?: ExtractionOptions): [string, string, ts.Node] | undefined {
     if (!ts.isCallExpression(node)) {
         throw new TypeScriptError('Invalid node type', node);
     }
@@ -206,10 +221,18 @@ function extractFromLocalizeCall(node: ts.Node): [string, string, ts.Node] {
 
     const key = extractString(args[0]);
     const value = extractString(args[1]);
+
+    if (isExcluded(options, key)) {
+        return undefined;
+    }
+
     return [key, value, args[1]];
 }
 
-function extractFromLocalizedCommandCall(node: ts.Node): { label: [string, string, ts.Node], category?: [string, string, ts.Node] } {
+function extractFromLocalizedCommandCall(node: ts.Node, errors?: string[], options?: ExtractionOptions): {
+    label: [string, string, ts.Node],
+    category?: [string, string, ts.Node]
+} {
     if (!ts.isCallExpression(node)) {
         throw new TypeScriptError('Invalid node type', node);
     }
@@ -248,8 +271,12 @@ function extractFromLocalizedCommandCall(node: ts.Node): { label: [string, strin
             labelNode = property.initializer;
         }
 
-        const value = extractString(property.initializer);
-        propertyMap.set(name, value);
+        try {
+            const value = extractString(property.initializer);
+            propertyMap.set(name, value);
+        } catch (err) {
+            reportError(err, errors, options);
+        }
     }
 
     let labelKey = propertyMap.get('id');
@@ -258,17 +285,25 @@ function extractFromLocalizedCommandCall(node: ts.Node): { label: [string, strin
 
     // We have an explicit label translation key
     if (args.length > 1) {
-        const labelOverrideKey = extractStringOrUndefined(args[1]);
-        if (labelOverrideKey) {
-            labelKey = labelOverrideKey;
-            labelNode = args[1];
+        try {
+            const labelOverrideKey = extractStringOrUndefined(args[1]);
+            if (labelOverrideKey) {
+                labelKey = labelOverrideKey;
+                labelNode = args[1];
+            }
+        } catch (err) {
+            reportError(err, errors, options);
         }
     }
 
     // We have an explicit category translation key
     if (args.length > 2) {
-        categoryKey = extractStringOrUndefined(args[2]);
-        categoryNode = args[2];
+        try {
+            categoryKey = extractStringOrUndefined(args[2]);
+            categoryNode = args[2];
+        } catch (err) {
+            reportError(err, errors, options);
+        }
     }
 
     if (!labelKey) {
@@ -302,15 +337,30 @@ function extractString(node: ts.Expression): string {
     if (ts.isIdentifier(node)) {
         const reference = followReference(node);
         if (!reference) {
-            throw new TypeScriptError(`Could not resolve reference to '${node.text}'`, node);
+            throw new TypeScriptError(`Skipping '${node.text}': could not resolve reference (may be imported from another file)`, node, true);
         }
         node = reference;
     }
-    if (ts.isTemplateLiteral(node)) {
+    // Template literals without interpolations (e.g. `some text`) are treated as plain strings.
+    // Multiline template literals are dedented to remove source code indentation.
+    if (ts.isNoSubstitutionTemplateLiteral(node)) {
+        return dedent(node.text);
+    }
+    // Template literals with interpolated expressions (e.g. `Hello ${name}`) cannot be
+    // statically resolved, so they are rejected. Use nls.localize format args instead.
+    if (ts.isTemplateExpression(node)) {
         throw new TypeScriptError(
-            "Template literals are not supported for localization. Please use the additional arguments of the 'nls.localize' function to format strings",
+            "Template literals with expressions are not supported for localization. Please use the additional arguments of the 'nls.localize' function to format strings",
             node
         );
+    }
+    // String concatenation (e.g. 'part one ' + 'part two') is resolved by recursively
+    // extracting both sides. This allows splitting long localization strings across lines.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+        return extractString(node.left) + extractString(node.right);
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isCallExpression(node)) {
+        throw new TypeScriptError(`Skipping '${node.getText()}': expression cannot be statically resolved`, node, true);
     }
     if (!ts.isStringLiteralLike(node)) {
         throw new TypeScriptError(`'${node.getText()}' is not a string constant`, node);
@@ -328,11 +378,9 @@ function followReference(node: ts.Identifier): ts.Expression | undefined {
     return next;
 }
 
-function collectScope(node: ts.Node, map: Map<string, ts.Expression> = new Map()): Map<string, ts.Expression> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const locals = (node as any)['locals'] as Map<string, ts.Symbol>;
-    if (locals) {
-        for (const [key, value] of locals.entries()) {
+function collectSymbols(symbols: Map<string, ts.Symbol> | undefined, map: Map<string, ts.Expression>): void {
+    if (symbols) {
+        for (const [key, value] of symbols.entries()) {
             if (!map.has(key)) {
                 const declaration = value.valueDeclaration;
                 if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
@@ -341,6 +389,16 @@ function collectScope(node: ts.Node, map: Map<string, ts.Expression> = new Map()
             }
         }
     }
+}
+
+function collectScope(node: ts.Node, map: Map<string, ts.Expression> = new Map()): Map<string, ts.Expression> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const locals = (node as any)['locals'] as Map<string, ts.Symbol>;
+    collectSymbols(locals, map);
+    // Exported declarations (e.g. `export const`) are stored in `symbol.exports` rather than `locals`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const exports = (node as any)['symbol']?.exports as Map<string, ts.Symbol> | undefined;
+    collectSymbols(exports, map);
     if (node.parent) {
         collectScope(node.parent, map);
     }
@@ -353,6 +411,37 @@ function isCommandLocalizeUtility(node: ts.Node): boolean {
     }
 
     return node.expression.getText() === 'Command.toLocalizedCommand';
+}
+
+/**
+ * Removes common leading whitespace from each line of a multiline string,
+ * similar to Python's `textwrap.dedent`. This is used to clean up template
+ * literals that inherit indentation from the surrounding source code.
+ */
+function dedent(str: string): string {
+    const lines = str.split('\n');
+    if (lines.length <= 1) {
+        return str;
+    }
+    // Find the minimum indentation across all non-empty lines (skipping the first line)
+    let minIndent = Infinity;
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.trim().length === 0) {
+            continue;
+        }
+        const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+        minIndent = Math.min(minIndent, indent);
+    }
+    if (minIndent === Infinity || minIndent === 0) {
+        return str;
+    }
+    // Remove the common indentation from all lines except the first
+    const dedented = [lines[0]];
+    for (let i = 1; i < lines.length; i++) {
+        dedented.push(lines[i].substring(minIndent));
+    }
+    return dedented.join('\n');
 }
 
 const unescapeMap: Record<string, string> = {

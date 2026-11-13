@@ -1,26 +1,25 @@
-/********************************************************************************
- * Copyright (C) 2018 TypeFox and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2018 TypeFox and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Command, CommandContribution, CommandRegistry, MenuContribution, MenuModelRegistry, CommandHandler } from '@theia/core';
 import { FrontendApplicationContribution, KeybindingContribution, KeybindingRegistry, CommonCommands } from '@theia/core/lib/browser';
-import { ConsoleManager } from './console-manager';
-import { ConsoleKeybindingContexts } from './console-keybinding-contexts';
-import { ConsoleWidget } from './console-widget';
-import { ConsoleContentWidget } from './console-content-widget';
+import { ConsoleManager } from './console-manager.js';
+import { ConsoleWidget } from './console-widget.js';
+import { ConsoleContentWidget } from './console-content-widget.js';
 import { nls } from '@theia/core/lib/common/nls';
 
 export namespace ConsoleCommands {
@@ -70,22 +69,22 @@ export class ConsoleContribution implements FrontendApplicationContribution, Com
         keybindings.registerKeybinding({
             command: ConsoleCommands.SELECT_ALL.id,
             keybinding: 'ctrlcmd+a',
-            context: ConsoleKeybindingContexts.consoleContentFocus
+            when: 'consoleContentFocus'
         });
         keybindings.registerKeybinding({
             command: ConsoleCommands.EXECUTE.id,
             keybinding: 'enter',
-            context: ConsoleKeybindingContexts.consoleInputFocus
+            when: 'consoleInputFocus'
         });
         keybindings.registerKeybinding({
             command: ConsoleCommands.NAVIGATE_BACK.id,
             keybinding: 'up',
-            context: ConsoleKeybindingContexts.consoleNavigationBackEnabled
+            when: 'consoleInputFocus && consoleNavigationBackEnabled'
         });
         keybindings.registerKeybinding({
             command: ConsoleCommands.NAVIGATE_FORWARD.id,
             keybinding: 'down',
-            context: ConsoleKeybindingContexts.consoleNavigationForwardEnabled
+            when: 'consoleInputFocus && consoleNavigationForwardEnabled'
         });
     }
 
@@ -102,12 +101,12 @@ export class ConsoleContribution implements FrontendApplicationContribution, Com
         });
         menus.registerMenuAction(ConsoleContextMenu.CLIPBOARD, {
             commandId: ConsoleCommands.COLLAPSE_ALL.id,
-            label: nls.localize('vscode/repl/collapse', 'Collapse All'),
+            label: nls.localizeByDefault('Collapse All'),
             order: 'a3'
         });
         menus.registerMenuAction(ConsoleContextMenu.CLEAR, {
             commandId: ConsoleCommands.CLEAR.id,
-            label: nls.localize('vscode/repl/clearRepl', 'Clear Console')
+            label: nls.localizeByDefault('Clear Console')
         });
     }
 

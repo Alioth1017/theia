@@ -1,18 +1,18 @@
-/********************************************************************************
- * Copyright (C) 2018 TypeFox and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2018 TypeFox and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
@@ -21,13 +21,13 @@ import { MaybePromise } from '@theia/core/lib/common/types';
 import { CommonCommands, quickCommand, OpenHandler, open, OpenerOptions, OpenerService, QuickPickItem, QuickPickValue } from '@theia/core/lib/browser';
 import { CommandRegistry, MenuModelRegistry, CommandService } from '@theia/core/lib/common';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
-import { OutputWidget } from './output-widget';
-import { OutputContextMenu } from './output-context-menu';
-import { OutputUri } from '../common/output-uri';
+import { OutputWidget } from './output-widget.js';
+import { OutputContextMenu } from './output-context-menu.js';
+import { OutputUri } from '../common/output-uri.js';
 import { ClipboardService } from '@theia/core/lib/browser/clipboard-service';
-import { OutputChannelManager, OutputChannel } from './output-channel';
-import { OutputCommands } from './output-commands';
-import { QuickPickService } from '@theia/core/lib/common/quick-pick-service';
+import { OutputChannelManager, OutputChannel } from './output-channel.js';
+import { OutputCommands } from './output-commands.js';
+import { QuickPickSeparator, QuickPickService } from '@theia/core/lib/common/quick-pick-service';
 import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
@@ -68,7 +68,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
             open(this.openerService, OutputUri.create(name), { activate: !preserveFocus, reveal: true }));
     }
 
-    registerCommands(registry: CommandRegistry): void {
+    override registerCommands(registry: CommandRegistry): void {
         super.registerCommands(registry);
         registry.registerCommand(OutputCommands.CLEAR__WIDGET, {
             isEnabled: arg => {
@@ -217,22 +217,22 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
         });
     }
 
-    registerMenus(registry: MenuModelRegistry): void {
+    override registerMenus(registry: MenuModelRegistry): void {
         super.registerMenus(registry);
         registry.registerMenuAction(OutputContextMenu.TEXT_EDIT_GROUP, {
             commandId: CommonCommands.COPY.id
         });
         registry.registerMenuAction(OutputContextMenu.TEXT_EDIT_GROUP, {
             commandId: OutputCommands.COPY_ALL.id,
-            label: nls.localize('vscode/search.contribution/copyAllLabel', 'Copy All')
+            label: nls.localizeByDefault('Copy All')
         });
         registry.registerMenuAction(OutputContextMenu.COMMAND_GROUP, {
             commandId: quickCommand.id,
-            label: nls.localize('vscode/quickAccess.contribution/commandsQuickAccess', 'Find Command...')
+            label: nls.localizeByDefault('Command Palette...')
         });
         registry.registerMenuAction(OutputContextMenu.WIDGET_GROUP, {
             commandId: OutputCommands.CLEAR__WIDGET.id,
-            label: nls.localize('vscode/output.contribution/clearOutput.label', 'Clear Output')
+            label: nls.localizeByDefault('Clear Output')
         });
     }
 
@@ -256,7 +256,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
     }
 
     protected async pick({ channels, placeholder }: { channels: OutputChannel[], placeholder: string }): Promise<OutputChannel | undefined> {
-        const items: Array<QuickPickValue<OutputChannel> | QuickPickItem> = [];
+        const items: Array<QuickPickValue<OutputChannel> | QuickPickItem | QuickPickSeparator> = [];
         const outputChannels = nls.localize('theia/output/outputChannels', 'Output Channels');
         const hiddenChannels = nls.localize('theia/output/hiddenChannels', 'Hidden Channels');
         for (let i = 0; i < channels.length; i++) {

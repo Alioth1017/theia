@@ -1,26 +1,29 @@
-/********************************************************************************
- * Copyright (C) 2021 Arm and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2021 Arm and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import { injectable, inject, optional, postConstruct } from 'inversify';
 import * as React from 'react';
-import ReactTooltip from 'react-tooltip';
-import { ReactRenderer, RendererHost } from './widgets/react-renderer';
-import { CorePreferences } from './core-preferences';
-import { DisposableCollection } from '../common/disposable';
-import { v4 } from 'uuid';
+import ReactTooltipModule from 'react-tooltip';
+import { ReactRenderer, RendererHost } from './widgets/react-renderer.js';
+import { generateUuid } from '../common/uuid.js';
+import { CorePreferences } from '../common/core-preferences.js';
+
+// The types of `react-tooltip` declare an ES module default export, but its CommonJS entry point assigns the component to
+// `module.exports`, which is what a default import from an ES module provides at runtime.
+const ReactTooltip = ReactTooltipModule as unknown as typeof ReactTooltipModule.default;
 
 export const TooltipService = Symbol('TooltipService');
 
@@ -55,13 +58,12 @@ export class TooltipServiceImpl extends ReactRenderer implements TooltipService 
 
     public readonly tooltipId: string;
     protected rendered = false;
-    protected toDispose: DisposableCollection = new DisposableCollection();
 
     constructor(
         @inject(RendererHost) @optional() host?: RendererHost
     ) {
         super(host);
-        this.tooltipId = v4();
+        this.tooltipId = generateUuid();
     }
 
     @postConstruct()
@@ -86,12 +88,12 @@ export class TooltipServiceImpl extends ReactRenderer implements TooltipService 
         ReactTooltip.rebuild();
     }
 
-    protected doRender(): React.ReactNode {
+    protected override doRender(): React.ReactNode {
         const hoverDelay = this.corePreferences.get(DELAY_PREFERENCE);
         return <ReactTooltip id={this.tooltipId} className='theia-tooltip' html={true} delayShow={hoverDelay} />;
     }
 
-    public dispose(): void {
+    public override dispose(): void {
         this.toDispose.dispose();
         super.dispose();
     }

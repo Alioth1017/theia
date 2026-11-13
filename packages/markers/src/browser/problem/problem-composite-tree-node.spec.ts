@@ -1,35 +1,38 @@
-/********************************************************************************
- * Copyright (C) 2021 EclipseSource and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2021 EclipseSource and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import { enableJSDOM } from '@theia/core/lib/browser/test/jsdom';
 let disableJSDOM = enableJSDOM();
 
+import { FrontendApplicationConfigProvider } from '@theia/core/lib/browser/frontend-application-config-provider';
+FrontendApplicationConfigProvider.set({});
+
 import URI from '@theia/core/lib/common/uri';
 import { expect } from 'chai';
 import { Container } from '@theia/core/shared/inversify';
-import { Diagnostic, Range, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-types';
+import { Diagnostic, Range, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-protocol';
 import { Event } from '@theia/core/lib/common/event';
-import { MarkerManager } from '../marker-manager';
-import { MarkerInfoNode, MarkerNode, MarkerOptions, MarkerRootNode } from '../marker-tree';
-import { PROBLEM_OPTIONS } from './problem-container';
-import { ProblemManager } from './problem-manager';
-import { ProblemTree } from './problem-tree-model';
+import { MarkerManager } from '../marker-manager.js';
+import { MarkerInfoNode, MarkerNode, MarkerOptions, MarkerRootNode } from '../marker-tree.js';
+import { PROBLEM_OPTIONS } from './problem-container.js';
+import { ProblemManager } from './problem-manager.js';
+import { ProblemTree } from './problem-tree-model.js';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
-import { ProblemCompositeTreeNode } from './problem-composite-tree-node';
-import { Marker } from '../../common/marker';
+import { ProblemCompositeTreeNode } from './problem-composite-tree-node.js';
+import { Marker } from '../../common/marker.js';
 
 disableJSDOM();
 
@@ -72,12 +75,16 @@ describe('problem-composite-tree-node', () => {
                 const lowMarkerNode = createMarkerInfo('2', new URI('b'), [lowNode]);
 
                 const highFirstRoot = getRootNode('highFirstRoot');
-                ProblemCompositeTreeNode.addChild(highFirstRoot, highMarkerNode, [highMarker]);
-                ProblemCompositeTreeNode.addChild(highFirstRoot, lowMarkerNode, [lowMarker]);
+                ProblemCompositeTreeNode.addChildren(highFirstRoot, [
+                    { node: highMarkerNode, markers: [highMarker] },
+                    { node: lowMarkerNode, markers: [lowMarker] },
+                ]);
                 expectCorrectOrdering(highFirstRoot);
                 const lowFirstRoot = getRootNode('lowFirstRoot');
-                ProblemCompositeTreeNode.addChild(lowFirstRoot, lowMarkerNode, [lowMarker]);
-                ProblemCompositeTreeNode.addChild(lowFirstRoot, highMarkerNode, [highMarker]);
+                ProblemCompositeTreeNode.addChildren(lowFirstRoot, [
+                    { node: lowMarkerNode, markers: [lowMarker] },
+                    { node: highMarkerNode, markers: [highMarker] },
+                ]);
                 expectCorrectOrdering(lowFirstRoot);
 
                 function expectCorrectOrdering(root: MarkerRootNode): void {
@@ -121,8 +128,10 @@ describe('problem-composite-tree-node', () => {
             const nodeB = createMockMarkerNode(markerB);
             const markerInfoNodeA = createMarkerInfo('1', new URI('a'), [nodeA]);
             const markerInfoNodeB = createMarkerInfo('2', new URI('b'), [nodeB]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeB, [markerB]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] },
+                { node: markerInfoNodeB, markers: [markerB] },
+            ]);
 
             expect(rootNode.children.length).to.equal(2);
             expect(rootNode.children[0]).to.equal(markerInfoNodeA);
@@ -135,10 +144,14 @@ describe('problem-composite-tree-node', () => {
             const markerA = createMockMarker({ start: { line: 0, character: 10 }, end: { line: 0, character: 10 } }, DiagnosticSeverity.Error);
             const nodeA = createMockMarkerNode(markerA);
             const markerInfoNodeA = createMarkerInfo('1', new URI('a'), [nodeA]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] }
+            ]);
 
             markerA.data.severity = DiagnosticSeverity.Hint;
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] }
+            ]);
 
             expect(rootNode.children.length).to.equal(1);
             expect(rootNode.children[0]).to.equal(markerInfoNodeA);
@@ -148,15 +161,21 @@ describe('problem-composite-tree-node', () => {
             const markerA = createMockMarker({ start: { line: 0, character: 10 }, end: { line: 0, character: 10 } }, DiagnosticSeverity.Error);
             const nodeA = createMockMarkerNode(markerA);
             const markerInfoNodeA = createMarkerInfo('1', new URI('a'), [nodeA]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] }
+            ]);
 
             const markerB = createMockMarker({ start: { line: 0, character: 10 }, end: { line: 0, character: 10 } }, DiagnosticSeverity.Error);
             const nodeB = createMockMarkerNode(markerB);
             const markerInfoNodeB = createMarkerInfo('2', new URI('b'), [nodeB]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeB, [markerB]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeB, markers: [markerB] }
+            ]);
 
             markerA.data.severity = DiagnosticSeverity.Hint;
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] }
+            ]);
 
             expect(rootNode.children.length).to.equal(2);
             expect(rootNode.children[0]).to.equal(markerInfoNodeB);
@@ -169,15 +188,21 @@ describe('problem-composite-tree-node', () => {
             const markerA = createMockMarker({ start: { line: 0, character: 10 }, end: { line: 0, character: 10 } }, DiagnosticSeverity.Hint);
             const nodeA = createMockMarkerNode(markerA);
             const markerInfoNodeA = createMarkerInfo('1', new URI('a'), [nodeA]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] }
+            ]);
 
             const markerB = createMockMarker({ start: { line: 0, character: 10 }, end: { line: 0, character: 10 } }, DiagnosticSeverity.Error);
             const nodeB = createMockMarkerNode(markerB);
             const markerInfoNodeB = createMarkerInfo('2', new URI('b'), [nodeB]);
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeB, [markerB]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeB, markers: [markerB] }
+            ]);
 
             markerA.data.severity = DiagnosticSeverity.Error;
-            ProblemCompositeTreeNode.addChild(rootNode, markerInfoNodeA, [markerA]);
+            ProblemCompositeTreeNode.addChildren(rootNode, [
+                { node: markerInfoNodeA, markers: [markerA] }
+            ]);
 
             expect(rootNode.children.length).to.equal(2);
             expect(rootNode.children[0]).to.equal(markerInfoNodeA);

@@ -1,18 +1,18 @@
-/********************************************************************************
- * Copyright (C) 2018 Red Hat, Inc. and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2018 Red Hat, Inc. and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
@@ -22,10 +22,10 @@ import { LabelProvider, isNative, AbstractDialog } from '@theia/core/lib/browser
 import { WindowService } from '@theia/core/lib/browser/window/window-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { FileDialogService } from '@theia/filesystem/lib/browser';
-import { HostedPluginServer } from '../common/plugin-dev-protocol';
-import { DebugPluginConfiguration, LaunchVSCodeArgument, LaunchVSCodeRequest, LaunchVSCodeResult } from '@theia/debug/lib/browser/debug-contribution';
+import { PluginDebugConfiguration, PluginDevServer } from '../common/plugin-dev-protocol.js';
+import { LaunchVSCodeArgument, LaunchVSCodeRequest, LaunchVSCodeResult } from '@theia/debug/lib/browser/debug-contribution';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
-import { HostedPluginPreferences } from './hosted-plugin-preferences';
+import { HostedPluginPreferences } from '../common/hosted-plugin-preferences.js';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { EnvVariablesServer } from '@theia/core/lib/common/env-variables';
 import { DebugSessionConnection } from '@theia/debug/lib/browser/debug-session-connection';
@@ -93,11 +93,17 @@ export class HostedPluginManagerClient {
 
     private connection: DebugSessionConnection;
 
+    // Session ID of the parent pwa-extensionHost debug session
+    protected hostedPluginSessionId: string | undefined;
+
     // path to the plugin on the file system
     protected pluginLocation: URI | undefined;
 
     // URL to the running plugin instance
     protected pluginInstanceURL: string | undefined;
+
+    // Electron window ID of the hosted plugin window, for closing on shutdown
+    protected hostedWindowId: number | undefined;
 
     protected isDebug = false;
 
@@ -107,8 +113,8 @@ export class HostedPluginManagerClient {
         return this.stateChanged.event;
     }
 
-    @inject(HostedPluginServer)
-    protected readonly hostedPluginServer: HostedPluginServer;
+    @inject(PluginDevServer)
+    protected readonly hostedPluginServer: PluginDevServer;
     @inject(MessageService)
     protected readonly messageService: MessageService;
     @inject(LabelProvider)
@@ -129,7 +135,11 @@ export class HostedPluginManagerClient {
     protected readonly fileDialogService: FileDialogService;
 
     @postConstruct()
-    protected async init(): Promise<void> {
+    protected init(): void {
+        this.doInit();
+    }
+
+    protected async doInit(): Promise<void> {
         this.openNewTabAskDialog = new OpenHostedInstanceLinkDialog(this.windowService);
 
         // is needed for case when page is loaded when hosted instance is already running.
@@ -145,7 +155,7 @@ export class HostedPluginManagerClient {
         return undefined;
     }
 
-    async start(debugConfig?: DebugPluginConfiguration): Promise<void> {
+    async start(debugConfig?: PluginDebugConfiguration): Promise<void> {
         if (await this.hostedPluginServer.isHostedPluginInstanceRunning()) {
             this.messageService.warn(nls.localize('theia/plugin-dev/alreadyRunning', 'Hosted instance is already running.'));
             return;
@@ -181,7 +191,7 @@ export class HostedPluginManagerClient {
         }
     }
 
-    async debug(config?: DebugPluginConfiguration): Promise<string | undefined> {
+    async debug(config?: PluginDebugConfiguration): Promise<string | undefined> {
         await this.start(this.setDebugConfig(config));
         await this.startDebugSessionManager();
 
@@ -198,15 +208,19 @@ export class HostedPluginManagerClient {
                 );
             }
         }
+        const name = nls.localize('theia/plugin-dev/hostedPlugin', 'Hosted Plugin');
         await this.debugSessionManager.start({
+            name,
             configuration: {
                 type: 'node',
                 request: 'attach',
                 timeout: 30000,
-                name: nls.localize('theia/plugin-dev/hostedPlugin', 'Hosted Plugin'),
+                name,
                 smartStep: true,
                 sourceMaps: !!outFiles,
-                outFiles
+                outFiles,
+                parentSessionId: this.hostedPluginSessionId,
+                lifecycleManagedByParent: true,
             }
         });
     }
@@ -219,6 +233,20 @@ export class HostedPluginManagerClient {
         try {
             this.stateChanged.fire({ state: HostedInstanceState.STOPPING, pluginLocation: this.pluginLocation! });
             await this.hostedPluginServer.terminateHostedPluginInstance();
+            if (this.hostedWindowId !== undefined) {
+                this.windowService.closeWindow(this.hostedWindowId);
+                this.hostedWindowId = undefined;
+            }
+            // Terminate the parent pwa-extensionHost debug session (and its children)
+            // so that stopping the hosted instance also ends all related debug sessions,
+            // matching VS Code's behavior where they are tightly coupled.
+            if (this.hostedPluginSessionId) {
+                const session = this.debugSessionManager.sessions.find(s => s.id === this.hostedPluginSessionId);
+                if (session) {
+                    this.debugSessionManager.terminateSession(session);
+                }
+                this.hostedPluginSessionId = undefined;
+            }
             this.messageService.info((this.pluginInstanceURL
                 ? nls.localize('theia/plugin-dev/instanceTerminated', '{0} has been terminated', this.pluginInstanceURL)
                 : nls.localize('theia/plugin-dev/unknownTerminated', 'The instance has been terminated')));
@@ -242,7 +270,8 @@ export class HostedPluginManagerClient {
                 try {
                     if (this.isDebug) {
                         this.pluginInstanceURL = await this.hostedPluginServer.runDebugHostedPluginInstance(this.pluginLocation!.toString(), {
-                            debugMode: this.hostedPluginPreferences['hosted-plugin.debugMode']
+                            debugMode: this.hostedPluginPreferences['hosted-plugin.debugMode'],
+                            debugPort: [...this.hostedPluginPreferences['hosted-plugin.debugPorts']]
                         });
                         await this.startDebugSessionManager();
                     } else {
@@ -280,7 +309,7 @@ export class HostedPluginManagerClient {
 
         const result = await this.fileDialogService.showOpenDialog({
             title: HostedPluginCommands.SELECT_PATH.label!,
-            openLabel: nls.localize('theia/plugin-dev/select', 'Select'),
+            openLabel: nls.localizeByDefault('Select'),
             canSelectFiles: false,
             canSelectFolders: true,
             canSelectMany: false
@@ -299,11 +328,25 @@ export class HostedPluginManagerClient {
     register(configType: string, connection: DebugSessionConnection): void {
         if (configType === 'pwa-extensionHost') {
             this.connection = connection;
+            this.hostedPluginSessionId = connection.sessionId;
             this.connection.onRequest('launchVSCode', (request: LaunchVSCodeRequest) => this.launchVSCode(request));
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             this.connection.on('exited', async (args: any) => {
                 await this.stop();
+            });
+
+            // Stop the hosted instance when the parent pwa-extensionHost session or any
+            // of its child sessions (e.g. "Hosted Plugin: Remote Process") are destroyed.
+            // The 'exited' event may not fire because the hosted backend process is not a
+            // child of the debug adapter.
+            const onDestroy = this.debugSessionManager.onDidDestroyDebugSession(async session => {
+                const isParent = session.id === this.hostedPluginSessionId;
+                const isChild = session.parentSession?.id === this.hostedPluginSessionId;
+                if ((isParent || isChild) && await this.hostedPluginServer.isHostedPluginInstanceRunning()) {
+                    onDestroy.dispose();
+                    await this.stop(false);
+                }
             });
         }
     }
@@ -312,17 +355,21 @@ export class HostedPluginManagerClient {
      * Opens window with URL to the running plugin instance.
      */
     protected async openPluginWindow(): Promise<void> {
-        // do nothing for electron browser
-        if (isNative) {
-            return;
-        }
-
         if (this.pluginInstanceURL) {
-            try {
-                this.windowService.openNewWindow(this.pluginInstanceURL);
-            } catch (err) {
-                // browser blocked opening of a new tab
-                this.openNewTabAskDialog.showOpenNewTabAskDialog(this.pluginInstanceURL);
+            if (isNative) {
+                // In Electron, the hosted backend is a headless Node.js server process.
+                // Open a new default window (file:// URL) pointing to the hosted backend's
+                // port, just like normal Electron windows. This ensures the origin is
+                // file:// which passes the ElectronWsOriginValidator.
+                const port = new URL(this.pluginInstanceURL).port;
+                this.hostedWindowId = await this.windowService.openNewDefaultWindow({ search: { port } });
+            } else {
+                try {
+                    this.windowService.openNewWindow(this.pluginInstanceURL);
+                } catch (err) {
+                    // browser blocked opening of a new tab
+                    this.openNewTabAskDialog.showOpenNewTabAskDialog(this.pluginInstanceURL);
+                }
             }
         }
     }
@@ -340,7 +387,7 @@ export class HostedPluginManagerClient {
            and new ones will be created by running `startDebugSessionManager()`
          */
         if (sessions.length > 0) {
-            sessions.forEach(session => session.terminate(false));
+            sessions.forEach(session => this.debugSessionManager.terminateSession(session));
             await this.startDebugSessionManager();
             instanceURI = this.pluginInstanceURL;
         } else {
@@ -361,15 +408,18 @@ export class HostedPluginManagerClient {
         return error?.message?.substring(error.message.indexOf(':') + 1) || '';
     }
 
-    private setDebugConfig(config?: DebugPluginConfiguration): DebugPluginConfiguration {
+    private setDebugConfig(config?: PluginDebugConfiguration): PluginDebugConfiguration {
         config = Object.assign(config || {}, { debugMode: this.hostedPluginPreferences['hosted-plugin.debugMode'] });
         if (config.pluginLocation) {
             this.pluginLocation = new URI((!config.pluginLocation.startsWith('/') ? '/' : '') + config.pluginLocation.replace(/\\/g, '/')).withScheme('file');
         }
+        if (config.debugPort === undefined) {
+            config.debugPort = [...this.hostedPluginPreferences['hosted-plugin.debugPorts']];
+        }
         return config;
     }
 
-    private getDebugPluginConfig(args: LaunchVSCodeArgument[]): DebugPluginConfiguration {
+    private getDebugPluginConfig(args: LaunchVSCodeArgument[]): PluginDebugConfiguration {
         let pluginLocation;
         for (const arg of args) {
             if (arg?.prefix === '--extensionDevelopmentPath=') {
@@ -396,24 +446,24 @@ class OpenHostedInstanceLinkDialog extends AbstractDialog<string> {
         });
         this.windowService = windowService;
 
-        this.linkNode = document.createElement('a');
+        this.linkNode = this.node.ownerDocument.createElement('a');
         this.linkNode.target = '_blank';
         this.linkNode.setAttribute('style', 'color: var(--theia-editorWidget-foreground);');
         this.contentNode.appendChild(this.linkNode);
 
-        const messageNode = document.createElement('div');
+        const messageNode = this.node.ownerDocument.createElement('div');
         messageNode.innerText = nls.localize('theia/plugin-dev/running', 'Hosted instance is running at:') + ' ';
         messageNode.appendChild(this.linkNode);
         this.contentNode.appendChild(messageNode);
 
         this.appendCloseButton();
-        this.openButton = this.appendAcceptButton('Open');
+        this.openButton = this.appendAcceptButton(nls.localizeByDefault('Open'));
     }
 
     showOpenNewTabAskDialog(uri: string): void {
         this.value = uri;
 
-        this.linkNode.innerHTML = uri;
+        this.linkNode.textContent = uri;
         this.linkNode.href = uri;
         this.openButton.onclick = () => {
             this.windowService.openNewWindow(uri);

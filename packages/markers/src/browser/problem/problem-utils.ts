@@ -1,21 +1,21 @@
-/********************************************************************************
- * Copyright (C) 2020 Ericsson and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2020 Ericsson and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
-import { Marker } from '../../common/marker';
-import { Diagnostic, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-types';
+import { Marker } from '../../common/marker.js';
+import { Diagnostic, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-protocol';
 
 export namespace ProblemUtils {
 
@@ -63,4 +63,28 @@ export namespace ProblemUtils {
      */
     export const ownerCompare = (a: Marker<Diagnostic>, b: Marker<Diagnostic>): number => a.owner.localeCompare(b.owner);
 
+    export function getPriority(marker: Marker<Diagnostic>): number {
+        const { severity } = marker.data;
+        switch (severity) {
+            case DiagnosticSeverity.Error: return 30;
+            case DiagnosticSeverity.Warning: return 20;
+            case DiagnosticSeverity.Information: return 10;
+            default: return 0;
+        }
+    }
+
+    export function getColor(marker: Marker<Diagnostic>): string {
+        const { severity } = marker.data;
+        switch (severity) {
+            case DiagnosticSeverity.Error: return 'list.errorForeground';
+            case DiagnosticSeverity.Warning: return 'list.warningForeground';
+            default: return ''; // other severities should not be decorated.
+        }
+    }
+
+    export function filterMarker(marker: Marker<Diagnostic>): boolean {
+        const { severity } = marker.data;
+        return severity === DiagnosticSeverity.Error
+            || severity === DiagnosticSeverity.Warning;
+    }
 }

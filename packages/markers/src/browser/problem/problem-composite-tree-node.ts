@@ -1,27 +1,32 @@
-/********************************************************************************
- * Copyright (C) 2021 EclipseSource and others.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * This Source Code may also be made available under the following Secondary
- * Licenses when the conditions for such availability set forth in the Eclipse
- * Public License v. 2.0 are satisfied: GNU General Public License, version 2
- * with the GNU Classpath Exception which is available at
- * https://www.gnu.org/software/classpath/license.html.
- *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
- ********************************************************************************/
+// *****************************************************************************
+// Copyright (C) 2021 EclipseSource and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the Eclipse Public License v. 2.0 which is available at
+// http://www.eclipse.org/legal/epl-2.0.
+//
+// This Source Code may also be made available under the following Secondary
+// Licenses when the conditions for such availability set forth in the Eclipse
+// Public License v. 2.0 are satisfied: GNU General Public License, version 2
+// with the GNU Classpath Exception which is available at
+// https://www.gnu.org/software/classpath/license.html.
+//
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
+// *****************************************************************************
 
 import { CompositeTreeNode } from '@theia/core/lib/browser/tree/tree';
-import { MarkerInfoNode } from '../marker-tree';
+import { MarkerInfoNode } from '../marker-tree.js';
 import URI from '@theia/core/lib/common/uri';
-import { Marker } from '../../common/marker';
-import { Diagnostic, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-types';
-import { ProblemUtils } from './problem-utils';
+import { Marker } from '../../common/marker.js';
+import { Diagnostic, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-protocol';
+import { ProblemUtils } from './problem-utils.js';
 
 export namespace ProblemCompositeTreeNode {
+
+    export interface Child {
+        node: MarkerInfoNode;
+        markers: Marker<Diagnostic>[];
+    }
 
     export function setSeverity(parent: MarkerInfoNode, markers: Marker<Diagnostic>[]): void {
         let maxSeverity: DiagnosticSeverity | undefined;
@@ -33,33 +38,46 @@ export namespace ProblemCompositeTreeNode {
         parent.severity = maxSeverity;
     };
 
-    export function addChild(parent: CompositeTreeNode, child: MarkerInfoNode, markers: Marker<Diagnostic>[]): CompositeTreeNode {
-        ProblemCompositeTreeNode.setSeverity(child, markers);
+    export function addChildren(parent: CompositeTreeNode, insertChildren: ProblemCompositeTreeNode.Child[]): void {
+        for (const { node, markers } of insertChildren) {
+            ProblemCompositeTreeNode.setSeverity(node, markers);
+        }
+
+        const sortedInsertChildren = insertChildren.sort(
+            (a, b) => (ProblemUtils.severityCompare(a.node.severity, b.node.severity) || compareURI(a.node.uri, b.node.uri))
+        );
+
+        let startIndex = 0;
         const children = parent.children as MarkerInfoNode[];
-        const index = children.findIndex(value => value.id === child.id);
-        if (index !== -1) {
-            CompositeTreeNode.removeChild(parent, child);
-        } if (children.length === 0) {
-            children.push(child);
-            CompositeTreeNode.setParent(child, 0, parent);
-        } else {
-            let inserted = false;
-            for (let i = 0; i < children.length; i++) {
-                // sort by severity, equal severity => sort by URI
-                if (ProblemUtils.severityCompare(child.severity, children[i].severity) < 0
-                    || (ProblemUtils.severityCompare(child.severity, children[i].severity) === 0 && compareURI(child.uri, children[i].uri) < 0)) {
-                    children.splice(i, 0, child);
-                    inserted = true;
-                    CompositeTreeNode.setParent(child, i, parent);
-                    break;
-                };
+        for (const { node } of sortedInsertChildren) {
+            const index = children.findIndex(value => value.id === node.id);
+            if (index !== -1) {
+                CompositeTreeNode.removeChild(parent, node);
             }
-            if (inserted === false) {
-                children.push(child);
-                CompositeTreeNode.setParent(child, children.length - 1, parent);
+            if (children.length === 0) {
+                children.push(node);
+                startIndex = 1;
+                CompositeTreeNode.setParent(node, 0, parent);
+            } else {
+                let inserted = false;
+                for (let i = startIndex; i < children.length; i++) {
+                    // sort by severity, equal severity => sort by URI
+                    if (ProblemUtils.severityCompare(node.severity, children[i].severity) < 0
+                        || (ProblemUtils.severityCompare(node.severity, children[i].severity) === 0 && compareURI(node.uri, children[i].uri) < 0)) {
+                        children.splice(i, 0, node);
+                        inserted = true;
+                        startIndex = i + 1;
+                        CompositeTreeNode.setParent(node, i, parent);
+                        break;
+                    };
+                }
+                if (inserted === false) {
+                    children.push(node);
+                    startIndex = children.length;
+                    CompositeTreeNode.setParent(node, children.length - 1, parent);
+                }
             }
         }
-        return parent;
     }
 
     const compareURI = (uri1: URI, uri2: URI): number =>

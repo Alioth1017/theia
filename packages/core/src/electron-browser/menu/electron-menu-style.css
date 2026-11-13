@@ -11,7 +11,7 @@
  * with the GNU Classpath Exception which is available at
  * https://www.gnu.org/software/classpath/license.html.
  *
- * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
+ * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0
  ********************************************************************************/
 
 #theia-drag-panel {
@@ -29,13 +29,43 @@
   -webkit-app-region: no-drag;
 }
 
+#theia-custom-title {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, 0px);
+  line-height: 30px;
+  flex: 0 1 auto;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: calc(100% - 160px);
+  text-align: center;
+  pointer-events: none;
+  zoom: 1;
+  -webkit-app-region: drag !important;
+}
+
+#theia-custom-title.relative {
+  transform: none;
+}
+
+#theia-custom-title.hidden {
+  visibility: hidden;
+}
+
 #window-controls {
   display: grid;
   grid-template-columns: repeat(3, 48px);
   position: absolute;
   top: 0;
   right: 0;
-  height: 100%;
+  height: var(--theia-private-menubar-height, 32px);
+  z-index: var(--theia-menu-z-index);
+  background: var(--theia-titleBar-activeBackground);
 }
 
 #window-controls .control-button {
@@ -51,7 +81,8 @@
   grid-column: 1;
 }
 
-#maximize-button, #restore-button {
+#maximize-button,
+#restore-button {
   grid-column: 2;
 }
 
@@ -68,7 +99,7 @@
 }
 
 #window-controls #close-button:hover {
-  background: #E81123;
+  background: #e81123;
 }
 
 #window-controls #close-button:hover:before {
